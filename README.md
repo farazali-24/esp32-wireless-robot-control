@@ -1,18 +1,19 @@
 
 # ESP32 Wireless Joystick Robot Control
 
-Design and implementation of a wireless joystick-controlled robot using two ESP32 microcontrollers and ESP-NOW communication. The project integrates analogue joystick inputs, wireless data transmission, DC motor speed control, servo steering and an emergency-stop function.
+Design and implementation of a wireless joystick-controlled robot using two ESP32 microcontrollers and ESP-NOW communication. The project integrates analogue joystick inputs, wireless data transmission, DC motor speed control, servo steering and a software emergency-stop function.
 
-Developed as part of an Electrical and Electronic Engineering laboratory project, building upon the previous EEEbot robot construction and motor-control work.
+Developed as part of an Electrical and Electronic Engineering laboratory project, building upon previous EEEbot construction and motor-control work.
 
 ## Demo / Images
 
-Original circuit diagrams, flowcharts and laboratory testing photographs are available in the [Project Documentation](docs/README.md).
+Original circuit diagrams, flowcharts and laboratory testing photographs will be added to the [Project Documentation](docs/README.md).
 
 ## Hardware
 
 - 2 × ESP32 development boards
 - Analogue joystick module with integrated push-button
+- Separate push-button for emergency stop
 - EEEbot robotic chassis
 - DC motors
 - Motor-driver circuitry
@@ -27,83 +28,126 @@ Original circuit diagrams, flowcharts and laboratory testing photographs are ava
 
 | Component | ESP32 GPIO | Function |
 |---|---|---|
-| Joystick X-axis | GPIO34 | Analogue horizontal input |
-| Joystick Y-axis | GPIO35 | Analogue vertical input |
-| Joystick push-button | GPIO32 | Emergency-stop input |
+| Joystick X-axis (VRX) | GPIO34 | Analogue steering input |
+| Joystick Y-axis (VRY) | GPIO35 | Analogue speed input |
+| Joystick push-button (SW) | GPIO32 | Joystick switch input |
+| Separate push-button (BTN) | GPIO33 | Emergency-stop command |
+| LED | GPIO25 | ESP-NOW transmission status |
 | Joystick VCC | 3.3V | Power supply |
 | Joystick GND | GND | Common ground |
 
-The receiver ESP32 connects to the robot's motor-control and servo circuitry. Its connections are documented in the receiver code and original laboratory diagrams.
+The joystick produces analogue values between 0 and 4095, which are mapped into a control range of approximately -100 to +100.
+
+The separate push-button connected to GPIO33 is used to send the emergency-stop command. The joystick's integrated switch is read separately.
+
+### Robot Receiver ESP32
+
+| Component | ESP32 GPIO | Function |
+|---|---|---|
+| Motor A enable (enA) | GPIO33 | PWM motor-speed control |
+| Motor B enable (enB) | GPIO25 | PWM motor-speed control |
+| Motor A direction (INa) | GPIO26 | Motor direction |
+| Motor A direction (INb) | GPIO27 | Motor direction |
+| Motor B direction (INc) | GPIO14 | Motor direction |
+| Motor B direction (INd) | GPIO12 | Motor direction |
+| Steering servo | GPIO13 | Servo control signal |
+
+These receiver pin assignments are taken from the wireless control implementation in the laboratory report.
+
+The controller and receiver use separate ESP32 boards, so the same GPIO number can be assigned to different components on each board.
+
+**Hardware note:** GPIO12 is a boot-strapping pin on the original ESP32. External motor-driver circuitry must not interfere with the required startup state.
 
 ## How it works
 
-The system uses two ESP32 boards communicating wirelessly through ESP-NOW.
+The wireless robot-control system uses two ESP32 microcontrollers communicating through ESP-NOW.
 
-One ESP32 acts as the controller, reading the joystick position and push-button state.
+The controller ESP32 reads the joystick position and button states, processes the inputs and transmits the information wirelessly.
 
-The second ESP32 acts as the receiver, processing incoming control data and controlling the robot's movement.
+The receiver ESP32 interprets the received commands and adjusts the DC motors and steering servo.
 
 ### 1. Joystick Input
 
-The analogue joystick produces different voltage levels depending on its position.
+The analogue joystick produces voltage signals corresponding to its horizontal and vertical positions.
 
-The controller ESP32 reads these signals using its analogue-to-digital converter (ADC).
+The controller uses the ESP32's analogue-to-digital converter (ADC) to read these signals.
 
-The joystick values are mapped from the ESP32's 12-bit ADC range (0–4095) to a control range of approximately -100 to +100.
+The 12-bit ADC readings are mapped from 0–4095 to approximately -100 to +100.
 
-These values represent the requested movement and steering.
+- X-axis: Steering input.
+- Y-axis: Motor speed and direction input.
+- Integrated joystick switch: Additional digital input.
+- Separate push-button: Emergency-stop command.
 
 ### 2. ESP-NOW Wireless Communication
 
 ESP-NOW is a wireless communication protocol supported by ESP32 microcontrollers.
 
-It allows compatible devices to exchange data directly without connecting to a conventional Wi-Fi network.
+It enables compatible devices to exchange data directly without requiring a conventional Wi-Fi network.
 
-The controller packages the joystick readings and button state into a data structure and transmits them to the receiver ESP32.
+The controller ESP32:
 
-### 3. Motor Speed Control
+1. Reads joystick and button inputs.
+2. Maps the analogue values into control commands.
+3. Packages the commands into a data structure.
+4. Transmits the data using ESP-NOW.
 
-The receiver processes the received joystick values to determine the robot's movement.
+The receiver ESP32:
 
-Pulse-width modulation (PWM) is used for DC motor speed control.
+1. Receives the wireless data.
+2. Extracts the joystick and button states.
+3. Processes movement and steering commands.
+4. Updates the motors and steering servo.
 
-By changing the control signals sent to the motor-driver circuitry, the system can adjust the robot's movement.
+### 3. DC Motor Speed Control
+
+The receiver processes the Y-axis joystick input to determine the requested motor speed and direction.
+
+Pulse-width modulation (PWM) is used to regulate motor speed.
+
+Direction-control signals determine whether the motors rotate forwards or backwards.
+
+Changing the joystick position changes the movement command sent to the robot.
 
 ### 4. Servo Steering
 
-The receiver also controls a servo motor to steer the robot.
+The receiver processes the X-axis joystick input to control the steering servo.
 
-The steering command is determined from the joystick input received wirelessly.
+The joystick's horizontal position is mapped to a servo angle.
+
+Moving the joystick left or right changes the requested steering direction.
 
 ### 5. Emergency Stop
 
-The joystick's integrated push-button provides an emergency-stop input.
+A separate push-button connected to GPIO33 on the controller sends the emergency-stop command.
 
-When activated, the control system commands the robot to stop moving.
+When the receiver detects that this button is pressed, it commands the DC motors to stop.
 
-This is a software-based stop function rather than an independently rated hardware safety system.
+The stop operates through software and wireless communication. It is not an independently rated hardware emergency-stop system.
 
 ## System Architecture
 
-The wireless control system consists of two main subsystems.
+The system consists of two connected embedded subsystems.
 
 ### Transmitter — Controller ESP32
 
-1. Read the joystick X-axis.
-2. Read the joystick Y-axis.
-3. Read the push-button state.
-4. Map the analogue readings to control values.
-5. Package the control data.
-6. Transmit the data using ESP-NOW.
+1. Read the joystick X-axis from GPIO34.
+2. Read the joystick Y-axis from GPIO35.
+3. Read the joystick switch from GPIO32.
+4. Read the separate push-button from GPIO33.
+5. Map the analogue readings to control values.
+6. Package the readings and button states.
+7. Transmit the data using ESP-NOW.
 
 ### Receiver — Robot ESP32
 
-1. Receive the wireless data.
+1. Receive the data through ESP-NOW.
 2. Extract the joystick and button values.
-3. Process the requested movement.
-4. Update the DC motor control signals.
-5. Update the steering servo.
-6. Stop the motors when the emergency-stop command is activated.
+3. Check whether the emergency-stop button is pressed.
+4. Calculate the required motor speed and direction.
+5. Update the motor-driver control signals.
+6. Calculate the steering angle.
+7. Update the steering servo.
 
 ## Software
 
@@ -113,54 +157,62 @@ The wireless control system consists of two main subsystems.
 - Arduino C/C++
 - ESP32 board support package
 - ESP-NOW communication library
-- ESP32 motor-control and servo functionality
+- Wi-Fi library for ESP32 wireless configuration
+- ESP32Servo library for steering control
 
 ### Project Files
 
 | File | Description |
 |---|---|
-| `controller/controller.ino` | Reads joystick inputs and transmits control data using ESP-NOW |
-| `receiver/receiver.ino` | Receives wireless commands and controls the robot's motors and steering |
+| `controller/controller.ino` | Reads joystick inputs and transmits wireless control data |
+| `receiver/receiver.ino` | Receives ESP-NOW commands and controls the motors and steering |
 | `docs/README.md` | Circuit diagrams, flowcharts, photographs and testing documentation |
 
-The transmitter and receiver are programmed separately because each ESP32 performs a different role.
+The transmitter and receiver use separate programs because each ESP32 performs a different role.
+
+**Compatibility note:** The Arduino sketches use ESP-NOW callback signatures associated with Arduino-ESP32 2.x. Changes may be required for Arduino-ESP32 3.x. The repository code has not been independently retested following documentation.
 
 ## Build & Run
 
-### 1. Assemble the Controller
+### 1. Assemble the Wireless Controller
 
-1. Connect the joystick module to the controller ESP32.
-2. Connect the X-axis output to GPIO34.
-3. Connect the Y-axis output to GPIO35.
-4. Connect the integrated push-button to GPIO32.
-5. Connect the joystick power and ground pins appropriately.
-6. Check the connections before applying power.
+1. Connect joystick VRX to GPIO34.
+2. Connect joystick VRY to GPIO35.
+3. Connect joystick SW to GPIO32.
+4. Connect the separate push-button to GPIO33.
+5. Connect the joystick to 3.3V and GND.
+6. Connect the status LED according to the controller circuit.
+7. Verify the wiring before applying power.
 
-### 2. Prepare the Receiver
+### 2. Prepare the Robot Receiver
 
-1. Connect the receiver ESP32 to the robot's motor-control circuitry.
-2. Connect the steering servo according to the receiver circuit.
-3. Verify the motor-driver connections and power supply.
-4. Check the wiring before powering the system.
+1. Connect the receiver ESP32 to the EEEbot motor-driver circuitry.
+2. Connect the two motor-enable signals to GPIO33 and GPIO25.
+3. Connect the motor-direction signals to GPIO26, GPIO27, GPIO14 and GPIO12.
+4. Connect the steering servo signal to GPIO13.
+5. Verify the power supply and common ground connections.
+6. Check the motor-driver wiring before powering the robot.
 
-### 3. Configure Wireless Communication
+### 3. Configure ESP-NOW
 
-1. Identify the ESP-NOW communication addresses required by the sketches.
-2. Configure the transmitter to communicate with the receiver.
-3. Ensure the communication data structures match.
-4. Upload the appropriate program to each ESP32.
+1. Identify the receiver ESP32's Wi-Fi MAC address.
+2. Configure the controller sketch to transmit to the receiver.
+3. Confirm that the transmitted and received data structures match.
+4. Upload the controller program to the transmitter ESP32.
+5. Upload the receiver program to the robot ESP32.
 
 ### 4. Test the System
 
-1. Power both ESP32 microcontrollers.
+1. Power both ESP32 boards.
 2. Open the Arduino IDE Serial Monitor where required.
-3. Check the joystick readings.
-4. Verify wireless transmission and reception.
-5. Test movement commands.
-6. Test steering.
-7. Test the emergency-stop button.
+3. Check the analogue joystick readings.
+4. Verify ESP-NOW communication.
+5. Test forward and reverse motor commands.
+6. Test steering control.
+7. Press the separate emergency-stop button.
+8. Confirm that the receiver commands the motors to stop.
 
-**Safety:** Test the robot with its drive wheels raised initially. A software emergency stop should not be relied upon as the sole protection against uncontrolled motion or communication failure.
+**Safety:** Initial motor tests should be conducted with the drive wheels raised. The software stop depends on wireless communication and should not be treated as an independent safety mechanism.
 
 ## Results / Notes
 
@@ -169,50 +221,53 @@ The transmitter and receiver are programmed separately because each ESP32 perfor
 The laboratory project demonstrated:
 
 - Wireless communication between two ESP32 microcontrollers.
-- Analogue joystick readings and input processing.
-- Transmission of joystick and button information through ESP-NOW.
-- Wireless robot movement control.
-- Servo steering.
-- Emergency-stop functionality.
+- Analogue joystick input processing.
+- Transmission of joystick and button data through ESP-NOW.
+- Wireless DC motor control.
+- Servo-based steering.
+- A software emergency-stop command.
 
-The wireless joystick control system was successfully demonstrated during laboratory testing.
+The wireless joystick-control system was successfully demonstrated during laboratory testing.
 
 ### Observations
 
-Some movement jitter and power fluctuations were observed at higher motor speeds.
+Some motor movement jitter and power fluctuations were observed at higher motor speeds.
 
-These observations highlighted the importance of stable power delivery, reliable control signals and testing under different operating conditions.
+These observations highlighted the importance of reliable control signals, stable power delivery and testing under different operating conditions.
 
 ### Limitations
 
-- Motor movement was not always completely smooth at higher speeds.
+- Motor movement was not always smooth at higher speeds.
 - Power fluctuations affected the consistency of operation.
 - The system depended on successful wireless communication.
-- The software emergency-stop function did not provide an independent hardware safety mechanism.
+- The receiver code did not implement an automatic communication-loss timeout.
+- The emergency-stop command depended on successful wireless transmission.
+- Additional sensor-feedback functionality explored in the laboratory was not successfully completed and is not included as an operational feature of this repository.
 
 ### Future Improvements
 
 - Improve power supply stability.
-- Refine motor speed and steering response.
-- Implement a communication-loss timeout that automatically stops the motors.
-- Improve joystick calibration and dead-zone handling.
-- Investigate closed-loop motor speed control.
-- Add reliable sensor feedback once the sensing hardware has been validated.
+- Implement a communication-loss timeout to stop the motors automatically.
+- Add joystick dead-zone handling and calibration.
+- Refine PWM motor-speed control.
+- Improve steering response and calibration.
+- Investigate closed-loop motor control using encoder feedback.
+- Add reliable sensor feedback after further hardware testing.
 
 ## What I Learned
 
-- How ESP-NOW enables direct communication between ESP32 microcontrollers.
-- How to use analogue joystick readings as control inputs.
-- How ADC values can be mapped into useful movement commands.
+- How ESP-NOW enables direct wireless communication between ESP32 microcontrollers.
+- How to read analogue joystick inputs using an ADC.
+- How to map sensor readings into usable control values.
 - How to transmit structured data between embedded devices.
 - How to integrate wireless communication with motor and servo control.
-- How to implement an emergency-stop command.
-- How to test and troubleshoot a multi-microcontroller system.
-- Why power stability and communication reliability are important in embedded robotics.
+- How to implement a software emergency-stop command.
+- How to test a system containing multiple microcontrollers.
+- Why stable power delivery and reliable communication matter in embedded robotics.
 
 ## Related Projects
 
-This project builds on the following earlier work:
+This project builds upon previous electronics and robotics work:
 
 - [EEEbot Robot Construction](https://github.com/farazali-24/eeebot-robot-construction)
 - [H-Bridge DC Motor Control](https://github.com/farazali-24/h-bridge-dc-motor-control)
@@ -226,7 +281,8 @@ Developed as part of an Electrical and Electronic Engineering laboratory project
 - Analogue joystick module
 - EEEbot robotic platform
 - DC motors and motor-driver circuitry
-- Servo motor
+- Steering servo
+- Laboratory power supplies and test equipment
 
 ## License
 
