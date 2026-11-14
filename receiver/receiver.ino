@@ -2,8 +2,10 @@
 #include <ESP32Servo.h>
 #include <esp_now.h>
 #include <WiFi.h>
+#include <string.h>
 
-// Data received from the joystick controller
+// Data received from the wireless joystick controller.
+// This structure must match the transmitter.
 typedef struct ControllerData {
   int16_t xAxis;
   int16_t yAxis;
@@ -13,7 +15,7 @@ typedef struct ControllerData {
 
 ControllerData receivedData;
 
-// Motor pins from Appendix B
+// Motor pins from laboratory Appendix B
 #define enA 33
 #define enB 25
 #define INa 26
@@ -23,16 +25,20 @@ ControllerData receivedData;
 
 // Servo settings
 #define SERVO_PIN 13
-#define SERVO_CENTER 91
+#define SERVO_CENTER 49
+
+// Steering correction retained from the previous sketch.
+// This value has not been verified against the original code.
 #define MAX_SERVO_CORRECTION 80
 
-#define MAX_SPEED 200
+// Maximum motor speed shown in the laboratory photograph
+#define MAX_SPEED 180
 
 Servo steeringServo;
 
 // Set DC motor speed and direction
 void setMotors(int speed) {
-  speed = -speed;  // Invert direction if required
+  speed = -speed;
 
   if (speed > 0) {
     digitalWrite(INa, HIGH);
@@ -59,26 +65,29 @@ void setMotors(int speed) {
   analogWrite(enB, pwmValue);
 }
 
-// Software emergency stop
+// Software emergency-stop command
 void emergencyStop() {
   setMotors(0);
 }
 
-// ESP-NOW receive callback (Arduino-ESP32 2.x)
-void onDataRecv(const uint8_t *mac,
+// ESP-NOW receive callback for Arduino-ESP32 3.x
+void onDataRecv(const esp_now_recv_info_t *info,
                 const uint8_t *incomingData,
                 int len) {
+
   if (len != sizeof(receivedData)) {
     return;
   }
 
   memcpy(&receivedData, incomingData, sizeof(receivedData));
 
+  // Separate emergency-stop button
   if (receivedData.buttonPressed) {
     emergencyStop();
     return;
   }
 
+  // Calculate steering angle
   int angle = constrain(
     SERVO_CENTER +
     map(
@@ -92,6 +101,7 @@ void onDataRecv(const uint8_t *mac,
 
   steeringServo.write(angle);
 
+  // Calculate motor speed
   int motorSpeed = map(
     receivedData.yAxis,
     -100, 100,
@@ -103,16 +113,8 @@ void onDataRecv(const uint8_t *mac,
 
 void setup() {
   Serial.begin(115200);
-  WiFi.mode(WIFI_STA);
 
-  if (esp_now_init() != ESP_OK) {
-    Serial.println("ESP-NOW initialization failed");
-    return;
-  }
-
-  esp_now_register_recv_cb(onDataRecv);
-
-  // Motor pin configuration
+  // Configure motor pins
   pinMode(enA, OUTPUT);
   pinMode(enB, OUTPUT);
   pinMode(INa, OUTPUT);
@@ -120,15 +122,32 @@ void setup() {
   pinMode(INc, OUTPUT);
   pinMode(INd, OUTPUT);
 
-  analogWrite(enA, 0);
-  analogWrite(enB, 0);
+  // Start with motors stopped
+  setMotors(0);
 
-  // Servo configuration
+  // Configure steering servo
   ESP32PWM::allocateTimer(0);
   steeringServo.setPeriodHertz(50);
   steeringServo.attach(SERVO_PIN, 1000, 2000);
   steeringServo.write(SERVO_CENTER);
+
+  // Configure wireless communication
+  WiFi.mode(WIFI_STA);
+
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("ESP-NOW initialization failed");
+    return;
+  }
+
+  if (esp_now_register_recv_cb(onDataRecv) != ESP_OK) {
+    Serial.println("Failed to register receive callback");
+    return;
+  }
+
+  Serial.println("ESP-NOW receiver initialized");
 }
 
 void loop() {
+  // Motor and steering commands are processed
+  // when a wireless data packet is received.
 }
